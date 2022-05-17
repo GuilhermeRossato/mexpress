@@ -1,5 +1,7 @@
 # Mexpress
 
+(Under development, not for production use)
+
 A fast and brutally minimalist web framework for Nodejs. This library allows you to create a http/https server to route callbacks from requests based on their pathname.
 
 This library:
