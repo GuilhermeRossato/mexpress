@@ -50,20 +50,20 @@ Every exported variable / method from this library is described on this very doc
 
 ```js
 // Server (MexpressServer)
-const app = require('mexpress')(); // Creates an app which can be passed to require('http').createServer if you want
-app.all(path: string, callback: function); // Adds a callback to any method on a path
+const app = require('mexpress')(); // Creates an app instance
+app.any(path: string, callback: function); // Adds a callback to any method on a path
 app.get(path: string, callback: function); // Adds a callback to the GET HTTP method on a path 
 app.post(path: string, callback: function); // Adds a callback to the POST HTTP method on a path
 app[method](path: string, callback: function);  // Adds a callback to a specific HTTP method on a path
-app.static(path: string, target: string); // Adds a static file handler to a target file (and only that file) or a folder (and all its subfolders)
+app.static(path: string, target: string); // Adds a static file handler to a target file or a folder and all its subfolders
 ```
 
 ```js
 // Request (MexpressRequest)
-request.params // object where keys are the name of the parameter in the path and values are their content
-request.url // a populated URL object
-request.query // object where keys are names of the query-string parameters and the values are their decoded values
-request.hash // string after the hash of a path name
+request.params // key-value object for the parameters on the path of the url
+request.url // the url string
+request.query // object where keys are names of the query-string parameters and their values
+request.cookies // object where each key is a cookie name and each value is the cookie value. Both are case sensitive.
 request.getBodyAsBinary(): Promise<Buffer> // Method to get all the request body as a binary buffer
 request.getBodyAsText([encoding] = 'utf8'): Promise<string> // Get the request body as a string
 request.getBodyAsJson(): Promise<any> // Get the request body as a json object
