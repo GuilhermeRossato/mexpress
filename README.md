@@ -62,10 +62,10 @@ app.static(path: string, target: string); // Adds a static file handler to a tar
 // Request (MexpressRequest)
 request.params // key-value object for the parameters on the path of the url
 request.url // the url string
-request.query // object where keys are names of the query-string parameters and their values
-request.cookies // object where each key is a cookie name and each value is the cookie value. Both are case sensitive.
+request.query // key-value object with the name and the value of the query string parameters after the question mark in a url
+request.cookies // object where each key is a cookie name and each value is the cookie value
 request.getBodyAsBinary(): Promise<Buffer> // Method to get all the request body as a binary buffer
-request.getBodyAsText([encoding] = 'utf8'): Promise<string> // Get the request body as a string
+request.getBodyAsText([encoding]): Promise<string> // Get the request body as a string
 request.getBodyAsJson(): Promise<any> // Get the request body as a json object
 ```
 

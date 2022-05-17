@@ -195,14 +195,15 @@ class MexpressResponse {
 
     /**
      * @param {string | Buffer} chunk
+     * @param {BufferEncoding} [encoding]
      * @returns {Promise<void>}
      */
-    write(chunk) {
+    write(chunk, encoding = 'utf8') {
         if (!(chunk instanceof Buffer) && typeof chunk !== 'string') {
             throw new Error('Invalid chunk parameter for response: expected string or Buffer instance.');
         }
         return new Promise(
-            (resolve, reject) => this.primitive.write(chunk, (err) => err ? reject(err) : resolve())
+            (resolve, reject) => this.primitive.write(chunk, encoding, (err) => err ? reject(err) : resolve())
         );
     }
 
