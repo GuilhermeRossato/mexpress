@@ -4,6 +4,6 @@
   "description": "An alternative to express http framework with minimal features, no dependencies, and that works for NodeJS 15.0 and up.",
   "main": "mexpress.js",
   "author": "GuilhermeRossato <guilhermrossato@gmail.com>",
-  "keywords": ["http-server", "simple", "routes"],
+  "keywords": ["http-server", "simple", "route"],
   "license": "MIT"
 }
