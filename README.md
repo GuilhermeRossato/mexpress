@@ -206,13 +206,26 @@ app.listen(8080, 'localhost');
 
 Be aware that files such as `./public/.env` are served to requests to `/.env` (if they are present).
 
-`use` requires the first argument to be a string because there are no variable function signatures in this library. This helps in keeping is complexity and volatility at a minimum. Either use `*` to match everything ot specify a mount point, such as the following example:
+`use` requires the first argument to be a string because there are no variable function signatures in this library. This helps in keeping is complexity and volatility at a minimum. Either use `*` or `/` to match everything or specify a mount point, such as `/public`, for example:
 
-You can serve files from virtual path prefix, for example serving the file `./public/index.html` at the url `/static/index.html` like this:
+You can serve files from virtual path prefix, serving file such as `./public/index.html` at the url `/static/index.html` like this:
 
 ```js
 app.use('/static', mexpress.static('public'));
 ```
+
+It should be noted that `/static/index.html` is also the default file for the directory, so it is also available by requesting `/static/`.
+
+## Static files
+
+To serve static files, you also use the `static` method, but with a file path as the function parameter:
+
+```js
+app.get('/', mexpress.static('./public/index.html'));
+app.get('/static.html', mexpress.static('./public/static.html'));
+```
+
+Remember that if the files are not found then `.next()` will be called and the other routes might handle these static files.
 
 ## Internal primitives
 
@@ -233,7 +246,7 @@ This library exports 2 things:
 1. A top level method to create the Mexpress application
 2. A `static` method to create static routes
 
-The library also exports some extra classes for typing purposes, you probably won't need them:
+The library also exports some extra classes for typing or mocking purposes, you probably won't need them, but for reference, here they are:
 
 3. A server class that is returned by the top level method that has methods to add route handlers
 4. A request class called MexpressRequest to wrap `IncomingRequest` predictably while adding some extra helper methods

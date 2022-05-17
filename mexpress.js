@@ -98,10 +98,11 @@ class MexpressRequest {
             if (!this.primitive) {
                 // @ts-ignore
                 if (this.body instanceof Buffer) {
+                    // @ts-ignore
                     resolve(this.body);
                     return;
                 }
-                reject(new Error('Cannot get body because this instance does not have a primitive IncomingRequest or a .body buffer property'));
+                reject(new Error('Cannot get request body because of it is the missing primitive (IncomingRequest) and missing a "body" property with the Buffer object'));
                 return;
             }
             const data = [];
@@ -121,11 +122,11 @@ class MexpressRequest {
     async getBodyAsText(encoding = null) {
         const buffer = await this.getBodyAsBinary();
         const contentType = this.headers['content-type'];
-        if (typeof contentType === 'string' && !encoding) {
+        if (contentType && !encoding) {
             /** @type {BufferEncoding[]} */
             const possibleEncodingList = ['ascii', 'utf8', 'utf-8', 'utf16le', 'ucs2', 'ucs-2', 'base64', 'base64url', 'latin1', 'binary', 'hex'];
             for (let possibleEncoding of possibleEncodingList) {
-                if (contentType.toLowerCase().includes(possibleEncoding)) {
+                if (contentType.includes(possibleEncoding)) {
                     encoding = possibleEncoding;
                     break;
                 }
@@ -672,7 +673,7 @@ class MexpressApp {
 
     /**
      * @param {http.IncomingMessage} request
-     * @param {http.ServerResponse} response
+     * @param {http.ServerResponse | null} response
      * @param {undefined | null | (() => void)} next
      */
     async handle(request, response, next) {
@@ -690,52 +691,26 @@ class MexpressApp {
                     route = route.next;
                     continue;
                 }
-                // Handle url parameters and matching
-                const result = populateParamsFromUrl(route.url, pathname);
-                if (!result.matching) {
-                    route = route.next;
-                    continue;
-                }
-                /**
-                 * @type {{[paramName: string]: string}}
-                 */
-                req.params = result.params;
+                // @ts-ignore
+                if (route.handler.isStatic === true) {
+                    if (route.url !== '*' && !pathname.startsWith(route.url)) {
+                        route = route.next;
+                        continue;
+                    }
 
-                try {
                     let nextCalled = false;
 
-                    let returned;
-
-                    // @ts-ignore
-                    if (route.handler.isStatic === true) {
-                        // Send an extra parameter to static handlers to aid in finding the file.
+                    // Send an extra parameter to static handlers to aid in finding the file.
+                    await route.handler(
+                        req,
+                        res,
+                        function () {
+                            nextCalled = true;
+                        },
                         // @ts-ignore
-                        returned = route.handler(
-                            req,
-                            res,
-                            function () {
-                                nextCalled = true;
-                            },
-                            // @ts-ignore
-                            route.url === '*' ? '' : route.url.substring(1)
-                        );
-                    } else {
-                        // Normal requests get 3 parameters
-                        returned = route.handler(
-                            req,
-                            res,
-                            function () {
-                                nextCalled = true;
-                            }
-                        );
-                    }
-                    if (returned instanceof Promise) {
-                        returned = await returned;
-                    }
-                    // @ts-ignore
-                    if (returned instanceof Promise) {
-                        returned = await returned;
-                    }
+                        route.url === '*' ? '' : route.url
+                    );
+
                     // Check if we must stop transversing the routes
                     if (res.complete) {
                         return;
@@ -744,15 +719,56 @@ class MexpressApp {
                         return;
                     }
                     route = route.next;
-                } catch (err) {
-                    if (RESPOND_ERRORS_WITH_THE_STACK_TRACE) {
-                        err.message = `Request "${request.url}" handling error: ${err.message}`;
-                        console.error(err);
+                    continue;
+                } else {
+                    // Handle url parameters and matching
+                    const result = populateParamsFromUrl(route.url, pathname);
+                    if (!result.matching) {
+                        route = route.next;
+                        continue;
                     }
+                    /**
+                     * @type {{[paramName: string]: string}}
+                     */
+                    req.params = result.params;
+    
                     try {
-                        await res.status(500).end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? (err.stack || err.message) : '');
-                    } catch (_err) {
-                        // Ignore request-closing error
+                        let nextCalled = false;
+    
+                        let returned = route.handler(
+                            req,
+                            res,
+                            function () {
+                                nextCalled = true;
+                            }
+                        );
+    
+                        if (returned instanceof Promise) {
+                            returned = await returned;
+                        }
+                        // @ts-ignore
+                        if (returned instanceof Promise) {
+                            returned = await returned;
+                        }
+                        // Check if we must stop transversing the routes
+                        if (res.complete) {
+                            return;
+                        }
+                        if (nextCalled === false) {
+                            return;
+                        }
+                        route = route.next;
+                        continue;
+                    } catch (err) {
+                        if (RESPOND_ERRORS_WITH_THE_STACK_TRACE) {
+                            err.message = `Request "${request.url}" handling error: ${err.message}`;
+                            console.error(err);
+                        }
+                        try {
+                            await res.status(500).end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? (err.stack || err.message) : '');
+                        } catch (_err) {
+                            // Ignore request-closing error
+                        }
                     }
                 }
             }
@@ -778,6 +794,7 @@ class MexpressApp {
      */
     listen(port = 8080, hostname = 'localhost', onListenStart = null) {
         const server = http.createServer(this.handle.bind(this));
+        this.server = server;
         server.listen(port, hostname, onListenStart);
     }
 }
@@ -820,41 +837,43 @@ mexpress.MexpressResponse = MexpressResponse;
 /**
  * Returns a route handler to serve static resources
  *
- * @param {string} staticFolderPath
+ * @param {string} staticPath
  * @param {{etagFeature?: boolean, lastModifiedFeature?: boolean}} options
  * @returns {(req: MexpressRequest, res: MexpressResponse, next: () => void) => Promise<void>}
  */
-mexpress.static = function(staticFolderPath, options = {}) {
+mexpress.static = function(staticPath, options = {}) {
     if (arguments.length !== 1) {
         throw new Error(`Static function must receive one parameter, got ${arguments.length}`);
-    } else if (typeof staticFolderPath !== 'string') {
-        throw new Error(`Static function must receive a string parameter, got ${typeof staticFolderPath}`)
+    } else if (typeof staticPath !== 'string') {
+        throw new Error(`Static function must receive a string parameter, got ${typeof staticPath}`)
     }
 
-    try {
-        const stat = fs.statSync(staticFolderPath);
-        if (!stat.isDirectory()) {
-            throw new Error('Static path is not a valid directory');
-        }
-    } catch (err) {
-        if (err.code === 'ENOENT') {
-            err.message = `Could not find target static folder at "${staticFolderPath}"`
-            throw err;
-        }
-    }
+    let stat;
 
-    /** @type {(req: MexpressRequest, res: MexpressResponse, next: () => void, extra: string) => Promise<void>} */
-    const f = async function(req, res, next, extra) {
-        if (typeof extra !== 'string') {
-            throw new Error('The extra parameter is missing for the static handler');
+    /** @type {(req: MexpressRequest, res: MexpressResponse, next: () => void, mountPoint: string) => Promise<void>} */
+    const f = async function(req, res, next, mountPoint) {
+        try {
+            stat = fs.statSync(staticPath);
+        } catch (err) {
+            if (err.code === 'ENOENT') {
+                next();
+                return;
+            } else {
+                err.message = `Could not find static target at "${staticPath}"`
+                throw err;
+            }
         }
-        let url = decodeURIComponent(extractPathnameFromRawUrl(req.url).substring(extra.length)).substring(1);
 
-        let fullPath = path.resolve(staticFolderPath, url);
+        let targetFile;
+        if (stat.isDirectory()) {
+            targetFile = path.resolve(staticPath, decodeURIComponent(req.url.substring(mountPoint.length + 1)));
+        } else {
+            targetFile = staticPath;
+        }
         let isDirectory;
         try {
             isDirectory = await new Promise((resolve, reject) => {
-                fs.stat(fullPath, (err, result) => {
+                fs.stat(targetFile, (err, result) => {
                     if (err) {
                         reject(err);
                     } else {
@@ -863,6 +882,7 @@ mexpress.static = function(staticFolderPath, options = {}) {
                 })
             });
         } catch (err) {
+            console.log('Could not find target ' + targetFile);
             if (err.code === 'ENOENT') {
                 next();
                 return;
@@ -871,30 +891,29 @@ mexpress.static = function(staticFolderPath, options = {}) {
                 return;
             }
         }
-        if (isDirectory && fullPath[fullPath.length-1] !== '/') {
-            fullPath += '/';
-        }
         if (isDirectory) {
-            fullPath += 'index.html';
+            targetFile += '/index.html';
         }
-        let lastModifiedTime = new Date();
-        try {
-            lastModifiedTime = await new Promise((resolve, reject) => {
-                fs.stat(fullPath, (err, result) => {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        resolve(result.mtime);
-                    }
-                })
-            });
-        } catch (err) {
-            if (err.code === 'ENOENT') {
-                next();
-                return;
-            } else {
-                await res.end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? (err.stack || err.message) : '');
-                return;
+        let lastModifiedTime = null;
+        if (options.etagFeature !== false || options.lastModifiedFeature !== false) {
+            try {
+                lastModifiedTime = await new Promise((resolve, reject) => {
+                    fs.stat(targetFile, (err, result) => {
+                        if (err) {
+                            reject(err);
+                        } else {
+                            resolve(result.mtime);
+                        }
+                    })
+                });
+            } catch (err) {
+                if (err.code === 'ENOENT') {
+                    next();
+                    return;
+                } else {
+                    await res.end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? (err.stack || err.message) : '');
+                    return;
+                }
             }
         }
         if (options.etagFeature !== false) {
@@ -944,7 +963,7 @@ mexpress.static = function(staticFolderPath, options = {}) {
                 }
             }
         }
-        await res.sendFile(fullPath, {
+        await res.sendFile(targetFile, {
             etagHeader: options.etagFeature,
             lastModifiedHeader: options.lastModifiedFeature,
         });
