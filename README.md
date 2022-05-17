@@ -2,17 +2,16 @@
 
 (Under development, not for production use)
 
-A fast and brutally minimalist web framework for Nodejs. This library allows you to create a http/https server to route callbacks from requests based on their pathname.
+A fast and brutally minimalist web-server handling module for Nodejs. It allows you to create a http/https server to route callbacks from requests based on their pathname.
 
 This library:
 
  - Is minimalist
  - Has no dependencies
- - Does not get new features over time (Only bugfixes)
- - Works for NodeJS 15 or up
- - Is entirely contained in a single javascript file 
+ - Is stable (no new features)
+ - Is a single javascript file with less than 1000 lines of code.
 
-It is an alternative to the [Expressjs](http://expressjs.com/) http framework.
+This project is just a minimalist alternative to the [Expressjs](http://expressjs.com/) http framework.
 
 ## Usage
 
@@ -21,64 +20,118 @@ It is an alternative to the [Expressjs](http://expressjs.com/) http framework.
 ```js
 const mexpress = require('mexpress');
 
-const app = mexpress({
-    host: 'localhost',
-    port: 8080,
-});
+const app = mexpress();
 
-app.use(function(req, res, next) {
-    console.log('Request passing through');
+app.use('*', (req, res, next) => {
+    if (!req.query.token) {
+        res.status(401).end('Missing token');
+        return;
+    }
     next();
 });
 
-app.get('/', function(req, res) {
-    console.log('Get handler');
-    console.log(req, res);
+app.post('/', async (req, res) => {
+    const data = await req.getBodyAsJson();
+    res.json(data);
 });
 
-app.listen().catch(console.error);
+app.get('/', (req, res) => {
+    res.sendFile('index.html');
+});
+
+app.listen(8080, 'localhost', () => {
+    console.log('Started listening at http://' + app.host + ':' + app.port);
+});
 ```
 
-# Usage example
+# Interface reference
+
+Every exported variable / method from this library is described on this very document you are reading. Here is a simplistic list of interfaces for reference, scroll down or [click here](#interface) for deeper explanations on each interface.
 
 ```js
-app.get(`/user/:id`, function(req, res) {
-    const id = req.params.id;
-    if (id === 0) {
-        res.status(404).end(`User ${id} not found`);
-        return;
-    }
-    res.sendFile(`./user${id}.html`);
-});
+// Server (MexpressServer)
+const app = require('mexpress')(); // Creates an app which can be passed to require('http').createServer if you want
+app.all(path: string, callback: function); // Adds a callback to any method on a path
+app.get(path: string, callback: function); // Adds a callback to the GET HTTP method on a path 
+app.post(path: string, callback: function); // Adds a callback to the POST HTTP method on a path
+app[method](path: string, callback: function);  // Adds a callback to a specific HTTP method on a path
+app.static(path: string, target: string); // Adds a static file handler to a target file (and only that file) or a folder (and all its subfolders)
 ```
 
-# Usage help
+```js
+// Request (MexpressRequest)
+request.params // object where keys are the name of the parameter in the path and values are their content
+request.url // a populated URL object
+request.query // object where keys are names of the query-string parameters and the values are their decoded values
+request.hash // string after the hash of a path name
+request.getBodyAsBinary(): Promise<Buffer> // Method to get all the request body as a binary buffer
+request.getBodyAsText([encoding] = 'utf8'): Promise<string> // Get the request body as a string
+request.getBodyAsJson(): Promise<any> // Get the request body as a json object
+```
 
-Scroll down or [click here](#interface) to see the methods and functions exported by this library.
+```js
+// Response (MexpressResponse)
+response.status(code); // Sets the response status code (does not sends the http header)
+response.header(name, value); // Sets a header value (does not sends the http header)
+response.setHeader(name, value); // Same as above
+response.write(data: Buffer | string): Promise<void>; // Writes data to the response (will send the http headers if weren't sent yet)
+response.end([data]: Buffer | string, [encoding] = 'utf8'): Promise<void>; // Finishes the http response, optionally adds a final data to the response
+response.json(data: any): Promise<void>; // Finishes the http response with a stringified JSON object as response.
+response.sendFile(path: string): Promise<void>; // Finishes the http response by streaming a file, populates the content-type header from the file extension
+response.redirect(url: string, [statusCode] = 302) // Sends a response with headers that instruct the browser to go to the destination url (temporary redirect if status is 302)
+```
 
-# How does it works
+Each method is described better on the [Interface](#interface) section.
 
-It creates a server with `require('http').createServer` then on every request it tries to match the list of routes with the request pathname, executing the callback if it is matching.
+# How it works
 
-If the callback does not call the `next` method then the route list loop ends and the response is considered handled. If no routes match, or the last route calls `next`, then a 404 (Not Found) response is sent.
+This library essentially exports a function that routes request in a linear fashion, allowing you to call `next` on each to go to the next one and also providing some useful helper methods.
+
+If no route matches (reaches the end of the route list) then the request is considered unhandled and a 404 status is sent to the client.
 
 # Why / Motivation
 
-Express.js is a huge code base with a hierarchy of dependencies that are hard to validate for security purposes. At the time of writing, `npm i express` installs 56 dependencies, uses 1.88 MB of space and has 153 javascript files with a total of **28.482** lines of code. Even if you could review that much code, express guys work hard to push new major versions with different stuff every full moon.
+Express.js is a huge code base with a hierarchy of dependencies that are hard to validate for security purposes. At the time I write this the command `npm install express` installs 56 dependencies, downloading 153 javascript files and uses 1.88 MB of disk. That is a total of **28.482** lines of code. Even if you could review that much code express devs work hard to push new major versions with different features every now and then and even provide you with a "upgrade guide". How nice of them!
 
-This library is one source file with 900 lines (33kb) that doesn't update unless a bug or a security concern is found or added by a future NodeJS version.
+This library is one source file with 958 lines (52 times smaller by file size) that does not update. The interface is solid, frozen in time.
 
-And it does two things: It creates an http/https server and it also route callbacks from requests based on their pathname.
+There are some situations in which updates in nodejs, new http specification, security concerns, bugs, etc, might need this library to update. But the general rule of thumb is: Decrease the work the developer has to do in order to keep their previous apps running.
 
-I also included few helper methods frequently used to handle http responses, such as `.sendFile(path)`, `.json(object)`, and `.redirect(url)`.
+This library is supposed to do two things: Create a function that can be passed to native nodejs http/https server and route callbacks from requests based on their path pattern.
+
+I included a few helper methods frequently used to handle http requests and responses, such as `.getBodyAsText()`, `.sendFile(filepath)`, `.json(object)`, and `.redirect(url)`, but those were either already present on express or are just too useful to leave them out.
+
+## Handling Cross Origin Resource Security
+
+This is the example of a permissive handling of CORS using this library to get you started:
+
+```js
+app.options('*', (req, res) => {
+    const origin = req.headers['origin'] || '*';
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,HEAD,PUT,DELETE,CONNECT,OPTIONS,PATCH,TRACE');
+    res.setHeader('Access-Control-Allow-Headers', 'content-type,content-length,authorization,pragma,cache-control,referer');
+    res.end();
+    return;
+})
+```
+
+## Creating a HTTPS server for production
+
+Do the same thing you would do with express:
+
+```js
+const mexpress = require('mexpress');
+const https = require('https');
+const app = mexpress();
+const server = https.createServer({key: key, cert: cert }, app);
+server.listen(443, '0.0.0.0', () => console.log('Listening at https://0.0.0.0:443/'));
+```
 
 ### Websockets
 
-Upgrade requests are not handled by the library.
-
-Although I don't think it is a good idea, you can do it manually by using the `primitive` property of the request that has an object of the IncomingMessage class. A good starting point is [this tutorial](https://medium.com/hackernoon/implementing-a-websocket-server-with-node-js-d9b78ec5ffa8).
-
-Here's a minimal implementation:
+Upgrade requests are not handled by the library, you can listen to the upgrade event on the native http/https server using the `primitive` property of the request (it has the `IncomingRequest` instance, which is an event emitter that emits `upgrade` events) and handle it with a library or manually, like this:
 
 ```js
 const crypto = require('crypto');
@@ -109,101 +162,98 @@ app.get('/', (req, res) => {
         // Finishes the connection header
         socket.write(`\r\n\r\n`);
         
-        // Receive data (in websocket protocol)
-        socket.on('data', data => {
-            console.log('Raw buffer data received at server:', data);
-        });
-        
-        socket.on('close', () => {
-            console.log('Client disconnected');
-        })
+        // Handle other socket events such as 'data' and 'end'.
     })
 })
 ```
 
 I may create a example repository of how to get `socket.io` to work with this library.
 
-## Handling Cross Origin Resource Security
+## Path patterns and parameters
 
-This is the example of a permissive handling of CORS using this library to get you started:
+Path patterns are strings you use to direct urls to callback, they work similarly to express:
 
-```js
-app.options('*', (req, res) => {
-    const origin = req.headers['origin'] || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,HEAD,PUT,DELETE,CONNECT,OPTIONS,PATCH,TRACE');
-    res.setHeader('Access-Control-Allow-Headers', 'content-type,content-length,authorization,pragma,cache-control,referer');
-    res.end();
-    return;
-})
-```
+There are three types of paths you can have in this library:
 
-## Path and parameters
+1. The wildcard, which is a single string with the asterisk: `*`, that matches every path.
+2. A basic path, which is static and full, such as `/` or `/api/users`.
+3. A parametrized path, which contains one or more parameters such as `/user/:id` or `/:project/:file`
 
-You can use a single asterisk as a path to match with everything, aside from that, paths can be of the following formats (one per line):
-
-```text
-/
-/foo
-/user/
-/user/:id
-/user/:id/posts
-/user/:id/posts/:postId
-/public/index.html
-/public/hello.txt/secret.txt
-/.git/object
-/~yes/
-```
-
-The parametric paths (such as `/user/:id`) specifies a param variable in its path and is available at the callback on the request object in the `param` property. Parametric objects can be used like this:
+Parametric paths (such as `/user/:id`) specifies a param variable in its path and is available at the callback on the request object in the `param` property. Parametric objects can be used like this:
 
 ```js
-app.get('/user/:id', (req, res) => {
+app.patch('/user/:id', (req, res) => {
     res.end(`The id is ${res.params.id}`);
 });
 ```
 
-In the example above, when the client sends a request with the path string as `/user/foo` then the `req.params.id` will have the value `foo`.
+In the example above, when a request is received with the path url as `/user/foo` the `req.params.id` variable will have the value `foo`. All values are guaranted to be strings.
 
-Query string parameters, also known as GET parameters, are the parameters present after the `?` (question mark) on an url. They are parsed and are available at the `query` property of the request and for a request url like `/?id=foo` can be accessed by `req.query.id`, for example.
+Query string parameters, also known as GET parameters, are the parameters present after the `?` (question mark) on an url, such as `/?username=john`. They are parsed and are available at the `query` property of the request and for a request url like `/?id=foo` can be accessed by `req.query.id`, for example.
+
+## Static folders
+
+Sometimes you need to serve a folder as static resources, it is done like this:
+
+```js
+const mexpress = require('mexpress');
+const app = mexpress();
+app.use('*', mexpress.static(
+    path.resolve(__dirname, 'public')
+))
+app.listen(8080, 'localhost');
+```
+
+Be aware that files such as `./public/.env` are served to requests to `/.env` (if they are present).
+
+`use` requires the first argument to be a string because there are no variable function signatures in this library. This helps in keeping is complexity and volatility at a minimum. Either use `*` to match everything ot specify a mount point, such as the following example:
+
+You can serve files from virtual path prefix, for example serving the file `./public/index.html` at the url `/static/index.html` like this:
+
+```js
+app.use('/static', mexpress.static('public'));
+```
 
 ## Internal primitives
 
-This library handles 3 internal objects for you, they are acessible at:
+You can access the primitives `IncomingRequest`, `ServerResponse` and `Server` at the following properties:
 
 ```js
-req.primitive instanceof http.IncomingRequest;
-res.primitive instanceof http.ServerResponse;
+request.primitive instanceof http.IncomingRequest;
+response.primitive instanceof http.ServerResponse;
 app.server instanceof http.Server;
 ```
 
+Note that `app.server` is only available if you created the server by calling `app.listen()`, as opposed to `require('http').createServer(app)`, because the later situation leaves the library without access to the primitive server object.
+
 # Interface
 
-### app = mexpress(config)
+This library exports 2 things:
 
-Creates an instance of the mexpress app. Serves as a representation of the server and has an interface to add routes and to start listening.
+1. A top level method to create the Mexpress application
+2. A `static` method to create static routes
+
+The library also exports some extra classes for typing purposes, you probably won't need them:
+
+3. A server class that is returned by the top level method that has methods to add route handlers
+4. A request class called MexpressRequest to wrap `IncomingRequest` predictably while adding some extra helper methods
+5. A response class called MexpressResponse to wrap `ServerResponse` predictably while adding some extra helper methods
+
+### require('mexpress')()
+
+Creates a server instance to represent your app. This representation is a `MexpressServer` and has methods to add routes, to add middlewares, and to start listening to a port. It can also be used as a function that receives raw request/response objects and routes callback accordingly.
 
 - **Syntax**
 
 ```text
-function mexpress(config: {
-    host?: string,
-    port?: number,
-    ssl?: {key: string, cert: string}
-}): MexpressApp
+mexpress(): MexpressApp
 ```
 
-- **Usage example** with the default values:
+- **Usage example**: Creates an Mexpress application
 
 ```js
 const mexpress = require('mexpress');
-const app = mexpress({
-    host: 'localhost',
-    port: 8080,
-    ssl: null
-});
-app.listen();
+const app = mexpress();
 ```
 
 ### static()
@@ -214,21 +264,21 @@ If the file is not found, then the route exits without finishing the request (it
 
 Warning: When this handler detects the `/.` sequence in the pathname it will skip the router due to security concerns (dotfiles are usually where passwords are saved). If you want to serve these (such as a `.env` file) you will need to explicily handle them.
 
- - Syntax
+ - **Syntax**
 
 ```text
-app.static(
-    rootDirectory
-): (req, res, next) => Promise<void>
+app.static(fileOrDirectoryPath: string): (req, res, next) => Promise<void>
 ```
 
- - Usage example for all files
+ - Usage example to route all file requests from public folder (including dotfiles such as `./public/.env`)
 
 ```js
 app.use('*', nexpress.static(
     path.resolve(__dirname, 'public')
 ));
 ```
+
+The above example allows someone to request `/` and get `./public/index.html`, but it also allows someone to request `/.env` and get `./public/.env` and any sub folder such as requesting `/hello/index.html` to get `./public/hello/index.html`.
 
 ### app.get(path, callback)
 
@@ -243,10 +293,9 @@ app.get(
 )
 ```
 
- - **Usage example**
+ - **Usage example**: Add a route to the `/login` GET request:
 
 ```js
-const app = mexpress();
 app.get('/login', (req, res) => {
     res.end('Hello world');
 });
@@ -265,19 +314,15 @@ app.post(
 );
 ```
 
-- **Usage example**
+- **Usage example**: Add a route to the `/login` POST request and handle it:
 
 ```js
-const app = mexpress();
 app.post('/login', async (req, res) => {
     const text = await req.getBodyAsText();
-    if (text[0] !== '{') {
-        return res.status(400).end('Expected valid json object as body');
+    if (!text) {
+        return res.status(400).end('Got empty body');
     }
-    const json = await req.getBodyAsJson();
-    await database.create('user', json);
-    
-    res.end('User added successfully');
+    res.end('POST Body: ' + text);
 });
 ```
 
@@ -299,7 +344,7 @@ app.trace(path, callback);
 
 ### app.use(path, callback)
 
-Register a route that matches all methods (will not check) to a certain pathname.
+Register a route that matches only the path pattern (does not check the method).
 
 - **Syntax**
 
@@ -315,25 +360,19 @@ app.use(
 ```js
 const app = mexpress();
 
-const sessions = new Map();
-
-sessions.set('foo', { data: 123 })
-
 app.use('*', async (req, res, next) => {
-    const session = sessions.get(req.headers['authorization']);
-    if (!session) {
-        res.status(401).end('Unauthorized');
-        return;
+    if (req.headers['authorization'] !== 'Bearer my-auth-token') {
+        return res.status(401).end('Unauthorized');
     }
     next();
 });
 
 app.get('/', (req, res) => {
-    res.end('You are logged in');
+    res.end('Welcome, bearer of ' + req.headers['authorization'].substring(7));
 });
 ```
 
-## How to read headers
+## How to read headers from the Request
 
 Headers are inside the request object `headers` property as key-value pairs, the keys are always lowercase.
 
@@ -344,7 +383,7 @@ app.get('/', (req, res) => {
 });
 ```
 
-## How to write headers
+## How to write headers to the Response
 
 Headers are written by calling `setHeader` method on the response object:
 
@@ -357,4 +396,4 @@ app.get('/', (req, res) => {
 
 ### Author
 
-This framework was written entirely by me (Guilherme Rossato) over a few days. It is currently being maintained by me until all the bugs are solved and will then enter a frozen state.
+This framework was written entirely by me (Guilherme Rossato) over a few days. It is currently being maintained by me until all the bugs are solved and will eventually enter a state where it wont get updates unless absolutely necessary.

@@ -7,40 +7,39 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { URL } = require('url');
 const mimeLookup = { 'aac': 'audio/aac', 'abw': 'application/x-abiword', 'arc': 'application/x-freearc', 'avi': 'video/x-msvideo', 'azw': 'application/vnd.amazon.ebook', 'bin': 'application/octet-stream', 'bmp': 'image/bmp', 'bz': 'application/x-bzip', 'bz2': 'application/x-bzip2', 'csh': 'application/x-csh', 'css': 'text/css', 'csv': 'text/csv', 'doc': 'application/msword', 'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'eot': 'application/vnd.ms-fontobject', 'epub': 'application/epub+zip', 'gz': 'application/gzip', 'gif': 'image/gif', 'htm': 'text/html', 'html': 'text/html', 'ico': 'image/vnd.microsoft.icon', 'ics': 'text/calendar', 'jar': 'application/java-archive', 'jpeg': 'image/jpeg', 'jpg': 'image/jpeg', 'js': 'text/javascript', 'json': 'application/json', 'jsonld': 'application/ld+json', 'mid': 'audio/midi', 'midi': 'audio/midi', 'mjs': 'text/javascript', 'mp3': 'audio/mpeg', 'mpeg': 'video/mpeg', 'mpkg': 'application/vnd.apple.installer+xml', 'odp': 'application/vnd.oasis.opendocument.presentation', 'ods': 'application/vnd.oasis.opendocument.spreadsheet', 'odt': 'application/vnd.oasis.opendocument.text', 'oga': 'audio/ogg', 'ogv': 'video/ogg', 'ogx': 'application/ogg', 'opus': 'audio/opus', 'otf': 'font/otf', 'png': 'image/png', 'pdf': 'application/pdf', 'php': 'application/x-httpd-php', 'ppt': 'application/vnd.ms-powerpoint', 'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'rar': 'application/vnd.rar', 'rtf': 'application/rtf', 'sh': 'application/x-sh', 'svg': 'image/svg+xml', 'swf': 'application/x-shockwave-flash', 'tar': 'application/x-tar', 'tif': 'image/tiff', 'tiff': 'image/tiff', 'ts': 'video/mp2t', 'ttf': 'font/ttf', 'txt': 'text/plain', 'vsd': 'application/vnd.visio', 'wav': 'audio/wav', 'weba': 'audio/webm', 'webm': 'video/webm', 'webp': 'image/webp', 'woff': 'font/woff', 'woff2': 'font/woff2', 'xhtml': 'application/xhtml+xml', 'xls': 'application/vnd.ms-excel', 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xml': 'application/xml ', 'xul': 'application/vnd.mozilla.xul+xml', 'zip': 'application/zip', '3gp': 'video/3gpp', '3g2': 'video/3gpp2', '7z': 'application/x-7z-compressed' };
 
 const RESPOND_ERRORS_WITH_THE_STACK_TRACE = process.env.NODE_ENV === 'development';
 
 /**
  * Factory function for MexpressRequest
- * @param {http.IncomingMessage} request 
+ * @param {http.IncomingMessage} request
  * @returns {MexpressRequest}
  */
 function generateMexpressRequestFromRequest(request) {
+    /** @type {any} */
+    const method = request.method;
     return new MexpressRequest(
-        request.method,
-        new URL(request.url, `https://${request.headers.host}`),
+        method,
+        request.url,
         request,
-    )
+    );
 }
 
 class MexpressRequest {
     /**
      * @param {'GET' | 'POST' | 'HEAD' | 'PUT' | 'DELETE' | 'CONNECT' | 'OPTIONS' | 'PATCH' | 'TRACE'} method
-     * @param {URL} url
+     * @param {string} url
      * @param {http.IncomingMessage | null} incomingRequest
      */
-    constructor(method, url, incomingRequest) {
+    constructor(method, url, incomingRequest = null) {
         this.method = method;
-
         this.url = url;
-
         this.primitive = incomingRequest;
 
         /**
          * The headers from the incoming request
-         * @type {{[headerName: string]: string}}
+         * @type {{[headerName: string]: string | string[]}}
          */
         this.headers = incomingRequest ? incomingRequest.headers : {};
 
@@ -55,34 +54,49 @@ class MexpressRequest {
 
         /**
          * The query string parameters (after the question mark on a url's pathname)
-         * @type {{[queryParam: string]: string} | null}
+         * @type {{[queryParam: string]: string}}
          */
-        this.query = null;
+        this.query = {};
+        if (url) {
+            const pathnameQuestionMarkIndex = url.indexOf('?');
+            if (pathnameQuestionMarkIndex !== -1) {
+                this.queryString = url.substring(pathnameQuestionMarkIndex + 1);
+                const queryParamList = this.queryString.split('&');
+                for (const queryParam of queryParamList) {
+                    const queryMiddleIndex = queryParam.indexOf('=');
+                    if (queryMiddleIndex === -1) {
+                        this.query[decodeURIComponent(queryParam)] = '';
+                    } else {
+                        this.query[decodeURIComponent(queryParam.substring(0, queryMiddleIndex))] = decodeURIComponent(queryParam.substring(queryMiddleIndex + 1));
+                    }
+                }
+            }
+        }
 
         /**
-         * The query string of the request (everything after the question mark)
-         * @type {string}
+         * The cookies as a key-value pair object
+         * @type {{[cookieName: string]: string}}
          */
-        this.queryString = '';
-
-        /**
-         * The hash string of the request (everything after the # but before the question mark)
-         */
-        this.hash = '';
-
-        /**
-         * The cookies from the 'Cookies' header
-         * @type {{[cookieName: string]: string} | null}
-         */
-        this.cookies = null;
+        this.cookies = {};
+        if (this.headers['cookie']) {
+            const cookies = this.headers['cookie'] instanceof Array ? this.headers['cookie'].join(';') : this.headers['cookie'];
+            const cookieList = cookies.split(';').map(pair => pair.trim().split('='));
+            for (const pair of cookieList) {
+                this.cookies[pair[0]] = pair[1];
+            }
+        }
     }
 
     async getBodyAsBinary() {
+        if (this.method === 'GET' || this.method === 'HEAD' || this.method === 'TRACE') {
+            throw new Error(`The request method (${this.method}) cannot have a request body`);
+        }
         if (this._binaryBody instanceof Promise) {
             await this._binaryBody;
         }
         this._binaryBody = new Promise((resolve, reject) => {
             if (!this.primitive) {
+                // @ts-ignore
                 if (this.body instanceof Buffer) {
                     resolve(this.body);
                     return;
@@ -99,8 +113,24 @@ class MexpressRequest {
         return this._binaryBody;
     }
 
-    async getBodyAsText(encoding = 'utf8') {
+    /**
+     * Get the request body as text, tries to find content-type encoding to use, has utf8 as fallback
+     * If an argument is supplied it will force the encoding instead of looking for one
+     * @param {BufferEncoding} [encoding]
+     */
+    async getBodyAsText(encoding = null) {
         const buffer = await this.getBodyAsBinary();
+        const contentType = this.headers['content-type'];
+        if (typeof contentType === 'string' && !encoding) {
+            /** @type {BufferEncoding[]} */
+            const possibleEncodingList = ['ascii', 'utf8', 'utf-8', 'utf16le', 'ucs2', 'ucs-2', 'base64', 'base64url', 'latin1', 'binary', 'hex'];
+            for (let possibleEncoding of possibleEncodingList) {
+                if (contentType.toLowerCase().includes(possibleEncoding)) {
+                    encoding = possibleEncoding;
+                    break;
+                }
+            }
+        }
         return buffer.toString(encoding);
     }
 
@@ -305,56 +335,166 @@ class MexpressResponse {
     }
 }
 
-function isInvalidUrl(url) {
-    return !url || typeof url !== 'string' || (url[0] === '*' && url.length !== 1) || (url[0] !== '/' && url[0] !== '*') || url.includes(' ') || url.includes('?') || url.includes('#');
+function isInvalidPathPattern(pattern) {
+    return !pattern || typeof pattern !== 'string' || (pattern[0] === '*' && pattern.length !== 1) || (pattern[0] !== '/' && pattern[0] !== '*') || pattern.includes(' ') || pattern.includes('?') || pattern.includes('#');
+}
+
+function populateParamsFromUrl(pattern, pathname) {
+    /**
+     * @type {{[paramName: string]: string}}
+     */
+    const params = {};
+
+    // Handle wildcard
+    if (pattern === '*') {
+        return {
+            matching: true,
+            params
+        }
+    }
+
+    // Handle simple routes
+    if (!pattern.includes('*') && !pattern.includes(':')) {
+        return {
+            matching: pattern === pathname,
+            params
+        }
+    }
+
+    // Handle route with parameters in path pattern
+    let matching = true;
+    let state = 'after-slash';
+    let paramName = '';
+    let paramValue = '';
+    let patternIndex = 0;
+    let pathIndex = 1;
+    for (patternIndex = 1; patternIndex <= pattern.length; patternIndex++) {
+        if (state === 'after-slash') {
+            if (pattern[patternIndex] === undefined) {
+                // The url ended after a matching slash
+                break;
+            } else if (pattern[patternIndex] === ':') {
+                state = 'inside-colon-param';
+                continue;
+            } else {
+                if (pathname[pathIndex] === pattern[patternIndex]) {
+                    pathIndex++;
+                    state = 'matching';
+                } else {
+                    matching = false;
+                    break;
+                }
+            }
+        } else if (state === 'inside-colon-param') {
+            // Retrieve param name from the route url
+            paramName = '';
+            while (patternIndex < pattern.length && pattern[patternIndex] !== '/') {
+                paramName += pattern[patternIndex];
+                patternIndex++;
+            }
+            // Retrieve param value from the pathname
+            paramValue = '';
+            while (pathIndex < pathname.length && pathname[pathIndex] !== '/') {
+                paramValue += pathname[pathIndex];
+                pathIndex++;
+            }
+            if (paramValue.length === 0) {
+                // Does not match because of empty parameter
+                matching = false;
+                break;
+            }
+            params[paramName] = decodeURIComponent(paramValue);
+            if (pattern[patternIndex] !== pathname[pathIndex]) {
+                // The slash (or lack of slash) does not match
+                matching = false;
+                break;
+            } else {
+                pathIndex++;
+            }
+            state = 'after-slash';
+        } else if (state === 'matching') {
+            if (pattern[patternIndex] === undefined) {
+                break;
+            } else if (pattern[patternIndex] === '/') {
+                if (pathname[pathIndex] === '/') {
+                    pathIndex++;
+                    state = 'after-slash';
+                } else {
+                    matching = false;
+                    break;
+                }
+            } else {
+                if (pattern[patternIndex] === pathname[pathIndex]) {
+                    pathIndex++;
+                    continue;
+                } else {
+                    matching = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    return {
+        matching,
+        params
+    };
 }
 
 /**
  * @typedef {(req: MexpressRequest, res: MexpressResponse, next: () => void) => (void | Promise<void>)} RequestHandlerFunction
  */
 
-class MexpressApp {
+class MexpressRouter {
     /**
-     * @param {string} host 
-     * @param {number} port 
-     * @param {{key: string, cert: string} | undefined} [ssl]
+     * @param {string} url
+     * @param {'GET' | 'POST' | 'HEAD' | 'PUT' | 'DELETE' | 'CONNECT' | 'OPTIONS' | 'PATCH' | 'TRACE' | null} method
+     * @param {RequestHandlerFunction} handler
+     * @param {null | MexpressRouter} next
      */
-    constructor(
-        host,
-        port,
-        ssl
-    ) {
-        if (typeof host !== 'string') {
-            throw new Error('Invalid host for Mexpress app');
-        }
-        if (typeof port !== 'number' || isNaN(port)) {
-            throw new Error('Invalid port for Mexpress app');
-        }
-        if (ssl && typeof ssl !== 'object') {
-            throw new Error('Invalid ssl parameter for Mexpress app: expected object');
-        }
-        if (ssl && (!ssl.key || !ssl.cert)) {
-            throw new Error('Invalid ssl object for Mexpress app: object is missing "key" or "cert" properties');
-        }
-        this.host = host;
-        this.port = port;
-        this.ssl = ssl;
+    constructor(url, method, handler, next) {
+        this.url = url;
+        this.method = method;
+        this.handler = handler;
+        this.next = next;
+    }
+}
 
+function extractPathnameFromRawUrl(url) {
+    if (typeof url !== 'string') {
+        throw new Error('Invalid url, expected string, got ' + typeof url);
+    }
+    const questionMarkIndex = url.indexOf('?');
+    if (questionMarkIndex !== -1) {
+        return url.substring(0, questionMarkIndex);
+    }
+    return url;
+}
+
+class MexpressApp {
+    
+    constructor() {
         /**
          * @type {
          *  {
          *      url: string,
-         *      method: 'get' | 'post' | 'head' | 'put' | 'delete' | 'connect' | 'options' | 'patch' | 'trace' | null,
+         *      method: 'GET' | 'POST' | 'HEAD' | 'PUT' | 'DELETE' | 'CONNECT' | 'OPTIONS' | 'PATCH' | 'TRACE' | null,
          *      handler: RequestHandlerFunction,
          *  }[]
          * }
          */
         this.routes = [];
 
+        /** @type {MexpressRouter} */
+        this._firstRoute = null;
+        /** @type {MexpressRouter} */
+        this._lastRoute = null;
+        this._routerCount = 0;
+
         /**
          * @type {http.Server | https.Server | null}
          */
-        this.primitive = null;
+        this.server = null;
     }
 
     /**
@@ -366,10 +506,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: null, handler });
+        this._addRoute(url, null, handler);
     }
 
     /**
@@ -381,10 +521,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'GET', handler });
+        this._addRoute(url, 'GET', handler);
     }
 
     /**
@@ -396,10 +536,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'POST', handler });
+        this._addRoute(url, 'POST', handler);
     }
 
     /**
@@ -411,10 +551,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'HEAD', handler });
+        this._addRoute(url, 'HEAD', handler);
     }
 
     /**
@@ -426,10 +566,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'PUT', handler });
+        this._addRoute(url, 'PUT', handler);
     }
 
     /**
@@ -441,10 +581,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'DELETE', handler });
+        this._addRoute(url, 'DELETE', handler);
     }
 
     /**
@@ -456,10 +596,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'CONNECT', handler });
+        this._addRoute(url, 'CONNECT', handler);
     }
 
     /**
@@ -471,10 +611,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'OPTIONS', handler });
+        this._addRoute(url, 'OPTIONS', handler);
     }
 
     /**
@@ -486,10 +626,10 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'PATCH', handler });
+        this._addRoute(url, 'PATCH', handler);
     }
 
     /**
@@ -501,260 +641,175 @@ class MexpressApp {
         if (arguments.length !== 2) {
             throw new Error(`Got ${arguments.length} arguments on a function that expected 2`);
         }
-        if (isInvalidUrl(url)) {
+        if (isInvalidPathPattern(url)) {
             throw new Error('The url is invalid, use an asterisk to match all');
         }
-        this.routes.push({ url, method: 'TRACE', handler });
+        this._addRoute(url, 'TRACE', handler);
     }
 
     /**
-     * Starts the listening of the server
-     * @params {() => void} (onListenStart)
-     * @returns {void}
+     * Appends a route to the linked list of routes
+     * @param {string} url 
+     * @param {'GET' | 'POST' | 'HEAD' | 'PUT' | 'DELETE' | 'CONNECT' | 'OPTIONS' | 'PATCH' | 'TRACE' | null} method 
+     * @param {(req: MexpressRequest, res: MexpressResponse, next: () => void) => void | Promise<void>} handler 
      */
-    listen(onListenStart) {
-        if (arguments.length > 0 && !(onListenStart instanceof Function)) {
-            throw new Error(`Invalid first parameter: expected function, got ${typeof onListenStart}`);
+    _addRoute(url, method, handler) {
+        /** @type {MexpressRouter} */
+        const route = {
+            url,
+            method,
+            handler,
+            next: null,
         }
-        if (arguments.length > 1) {
-            throw new Error('Listen does not receive more than one parameter. Host and port are to be passed at the app config object');
-        }
-        if (this.ssl) {
-            this.server = https.createServer({
-                key: this.ssl.key,
-                cert: this.ssl.cert
-            }, (req, res) => {
-                const mexpressRequest = generateMexpressRequestFromRequest(req);
-                const mexpressResponse = generateMexpressResponseFromResponse(res);
-                this.handleRequest(mexpressRequest, mexpressResponse).catch(
-                    err => res.status(500).end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? (err.stack || err.message) : null)
-                );
-            });
+        if (this._lastRoute) {
+            this._lastRoute.next = route;
+            this._lastRoute = route;
         } else {
-            this.server = http.createServer((req, res) => {
-                const mexpressRequest = generateMexpressRequestFromRequest(req);
-                const mexpressResponse = generateMexpressResponseFromResponse(res);
-                this.handleRequest(mexpressRequest, mexpressResponse).catch(
-                    err => res.writeHead(500).end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? (err.stack || err.message) : null)
-                );
-            });
+            this._firstRoute = this._lastRoute = route;
         }
-        this.server.listen(this.port, this.host, onListenStart);
+        this._routerCount++;
     }
 
     /**
-     * @param {MexpressRequest} req
-     * @param {MexpressResponse} res
-     * @private
+     * @param {http.IncomingMessage} request
+     * @param {http.ServerResponse} response
+     * @param {undefined | null | (() => void)} next
      */
-    async handleRequest(req, res) {
-        let matchCount = 0;
-        for (let i = 0; i < this.routes.length; i++) {
-            const route = this.routes[i];
-            if (route.method !== null && route.method !== req.method) {
-                continue;
-            }
-            let matching = true;
-            const pathname = req.url.pathname;
+    async handle(request, response, next) {
+        try {
+            const pathname = extractPathnameFromRawUrl(request.url);
+            const req = generateMexpressRequestFromRequest(request);
+            const res = generateMexpressResponseFromResponse(response);
 
-            // Handle url parameters and matching
-            /**
-             * @type {{[paramName: string]: string}}
-             */
-            req.params = {};
-            if (route.url !== '*') {
-                if (!route.url.includes(':') && !pathname.includes('{')) {
-                    // Simple parameter
-                    matching = route.url === pathname;
-                } else {
-                    matching = true;
-                    let state = 'after-slash';
-                    let paramName = '';
-                    let paramValue = '';
-                    let urlIndex = 0;
-                    let pathIndex = 1;
-                    for (urlIndex = 1; urlIndex <= route.url.length; urlIndex++) {
-                        if (state === 'after-slash') {
-                            if (route.url[urlIndex] === undefined) {
-                                // The url ended after a matching slash
-                                break;
-                            } else if (route.url[urlIndex] === ':') {
-                                state = 'inside-colon-param';
-                                continue;
-                            } else {
-                                if (pathname[pathIndex] === route.url[urlIndex]) {
-                                    pathIndex++;
-                                    state = 'matching';
-                                } else {
-                                    matching = false;
-                                    break;
-                                }
-                            }
-                        } else if (state === 'inside-colon-param') {
-                            // Retrieve param name from the route url
-                            while (urlIndex < route.url.length && route.url[urlIndex] !== '/') {
-                                paramName += route.url[urlIndex];
-                                urlIndex++;
-                            }
-                            // Retrieve param value from the pathname
-                            paramValue = '';
-                            while (pathIndex < pathname.length && pathname[pathIndex] !== '/') {
-                                paramValue += pathname[pathIndex];
-                                pathIndex++;
-                            }
-                            if (paramValue.length === 0) {
-                                // Does not match because of empty parameter
-                                matching = false;
-                                break;
-                            }
-                            req.params[paramName] = decodeURIComponent(paramValue);
-                            state = 'after-slash';
-                        } else if (state === 'matching') {
-                            if (route.url[urlIndex] === undefined) {
-                                break;
-                            } else if (route.url[urlIndex] === '/') {
-                                if (pathname[pathIndex] === '/') {
-                                    pathIndex++;
-                                    state = 'after-slash';
-                                } else {
-                                    matching = false;
-                                    break;
-                                }
-                            } else {
-                                if (route.url[urlIndex] === pathname[pathIndex]) {
-                                    pathIndex++;
-                                    continue;
-                                } else {
-                                    matching = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+            let route = this._firstRoute;
+            for (let i = 0; i < this._routerCount + 1; i++) {
+                if (route === null) {
+                    return res.status(404).end();
                 }
-            }
+                if (route.method !== null && route.method !== req.method) {
+                    route = route.next;
+                    continue;
+                }
+                // Handle url parameters and matching
+                const result = populateParamsFromUrl(route.url, pathname);
+                if (!result.matching) {
+                    route = route.next;
+                    continue;
+                }
+                /**
+                 * @type {{[paramName: string]: string}}
+                 */
+                req.params = result.params;
 
-            if (matching === false) {
-                // Check if this is the last unhandled route
-                if (i+1 === this.routes.length) {
-                    await res.status(404).end('');
-                    return;
-                }
-                continue;
-            }
-
-            if (req.query === null) {
-                // Handle query string parameters (query)
-                req.query = {};
-                const pathnameQuestionMarkIndex = pathname.indexOf('?');
-                if (pathnameQuestionMarkIndex !== -1) {
-                    req.queryString = pathname.substring(pathnameQuestionMarkIndex);
-                    const queryParamList = req.queryString.split('&');
-                    for (const queryParam of queryParamList) {
-                        const queryMiddleIndex = queryParam.indexOf('=');
-                        if (queryMiddleIndex === -1) {
-                            req.query[queryParam] = '';
-                        } else {
-                            req.query[queryParam.substring(0, queryMiddleIndex)] = queryParam.substring(queryMiddleIndex + 1);
-                        }
-                    }
-                }
-            }
-
-            if (req.cookies === null) {
-                // Handle cookies
-                req.cookies = {};
-                if (req.headers['cookie']) {
-                    const cookieList = req.headers['cookie'].split(';').map(pair => pair.trim().split('='));
-                    for (const cookie of cookieList) {
-                        req.cookies[cookie[0]] = cookie[1];
-                    }
-                }
-            }
-
-            matchCount++;
-
-            try {
-                let nextCalled = false;
-
-                let result;
-
-                // @ts-ignore
-                if (route.handler.isStatic === true) {
-                    // Send an extra parameter to static handlers to aid in finding the file.
-                    // @ts-ignore
-                    result = route.handler(
-                        req,
-                        res,
-                        function () {
-                            nextCalled = true;
-                        },
-                        route.url === '*' ? '' : route.url.substring(1)
-                    );
-                } else {
-                    // Normal requests get 3 parameters
-                    result = route.handler(
-                        req,
-                        res,
-                        function () {
-                            nextCalled = true;
-                        }
-                    );
-                }
-                let returnedValue = result;
-                if (result instanceof Promise) {
-                    returnedValue = await result;
-                }
-                if (returnedValue !== undefined && returnedValue !== null) {
-                    throw new Error(`Request handler should not result into anything, got type "${typeof returnedValue}"`);
-                }
-                // Check if we must stop transversing the routes
-                if (res.complete) {
-                    return;
-                }
-                if (nextCalled === false) {
-                    return;
-                }
-                matchCount--;
-            } catch (err) {
-                if (process.env.NODE_ENV === 'development') {
-                    err.message = `Error while handling request: ${err.message}`;
-                    console.error(err);
-                }
                 try {
-                    await res.status(500).end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? '' : err.stack);
-                } catch (_err) {
-                    // Ignore request-closing error
+                    let nextCalled = false;
+
+                    let returned;
+
+                    // @ts-ignore
+                    if (route.handler.isStatic === true) {
+                        // Send an extra parameter to static handlers to aid in finding the file.
+                        // @ts-ignore
+                        returned = route.handler(
+                            req,
+                            res,
+                            function () {
+                                nextCalled = true;
+                            },
+                            // @ts-ignore
+                            route.url === '*' ? '' : route.url.substring(1)
+                        );
+                    } else {
+                        // Normal requests get 3 parameters
+                        returned = route.handler(
+                            req,
+                            res,
+                            function () {
+                                nextCalled = true;
+                            }
+                        );
+                    }
+                    if (returned instanceof Promise) {
+                        returned = await returned;
+                    }
+                    // @ts-ignore
+                    if (returned instanceof Promise) {
+                        returned = await returned;
+                    }
+                    // Check if we must stop transversing the routes
+                    if (res.complete) {
+                        return;
+                    }
+                    if (nextCalled === false) {
+                        return;
+                    }
+                    route = route.next;
+                } catch (err) {
+                    if (RESPOND_ERRORS_WITH_THE_STACK_TRACE) {
+                        err.message = `Request "${request.url}" handling error: ${err.message}`;
+                        console.error(err);
+                    }
+                    try {
+                        await res.status(500).end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? (err.stack || err.message) : '');
+                    } catch (_err) {
+                        // Ignore request-closing error
+                    }
                 }
             }
+        } catch (err) {
+            try {
+                response.writeHead(500)
+            } catch (internalError) {
+                // Ignore header nested error
+            }
+            try {
+                response.end(RESPOND_ERRORS_WITH_THE_STACK_TRACE ? (err.stack || err.message) : '');
+            } catch (internalError) {
+                // Ignore end nested error
+            }
         }
-        if (matchCount === 0) {
-            await res.status(404).end('');
-        }
+    }
+
+    /**
+     * port?: number, hostname?: string, backlog?: number, listeningListener?: () => void
+     * @param {number} [port]
+     * @param {string} [hostname] 
+     * @param {() => void} [onListenStart] 
+     */
+    listen(port = 8080, hostname = 'localhost', onListenStart = null) {
+        const server = http.createServer(this.handle.bind(this));
+        server.listen(port, hostname, onListenStart);
     }
 }
 
 /**
  * Generates an http or https server app instance with the given configuration
- * @param {{host: 'localhost' | string, port: 8080 | number, ssl?: {key: string, cert: string}}} [config]
  * @returns {MexpressApp}
  */
-const mexpress = function mexpress(config = { host: 'localhost', port: 8080 }) {
-    if (typeof config !== 'object') {
-        throw new Error('Invalid config object parameter');
-    }
-    const allowedObjectKeys = ['host', 'port', 'ssl'];
-    const invalidKeyList = Object.keys(config).filter(key => !allowedObjectKeys.includes(key));
+const mexpress = function mexpress() {
+    /** @type {MexpressApp} */
+    let app = null;
 
-    if (invalidKeyList.length > 0) {
-        throw new Error(`Config object has ${invalidKeyList.length === 1 ? 'an' : invalidKeyList.length} unrecognized propert${invalidKeyList.length === 1 ? 'y' : 'ies'}: "${invalidKeyList[0]}".`);
+    // @ts-ignore
+    app = function(req, res, next) {
+        // @ts-ignore
+        app.handle(req, res, next);
+    };
+
+    const instance = new MexpressApp();
+
+    // Add MexpressApp methods
+    for (const key of Object.getOwnPropertyNames(MexpressApp.prototype)) {
+        if (key === 'constructor') {
+            continue;
+        }
+        app[key] = instance[key];
     }
 
-    const app = new MexpressApp(
-        config.host || 'localhost',
-        config.port || 8080,
-        config.ssl || null
-    );
+    // Add MexpressApp properties
+    for (const key of Object.getOwnPropertyNames(instance)) {
+        app[key] = instance[key];
+    }
 
     return app;
 }
@@ -764,11 +819,10 @@ mexpress.MexpressResponse = MexpressResponse;
 
 /**
  * Returns a route handler to serve static resources
- * This will call next() on the handler if the url contains a '/.' sequence which indicates a request for dotfiles / dotfolders.
- * For example, the following files will trigger a next() call: ['/.env', '/.git/object.txt', '/.env.dev', '/../']
+ *
  * @param {string} staticFolderPath
  * @param {{etagFeature?: boolean, lastModifiedFeature?: boolean}} options
- * @returns {function(req: MexpressRequest, res: MexpressResponse, next: () => void): Promise<void>}
+ * @returns {(req: MexpressRequest, res: MexpressResponse, next: () => void) => Promise<void>}
  */
 mexpress.static = function(staticFolderPath, options = {}) {
     if (arguments.length !== 1) {
@@ -789,29 +843,12 @@ mexpress.static = function(staticFolderPath, options = {}) {
         }
     }
 
-    /** @type {function(req: MexpressRequest, res: MexpressResponse, next: () => void): Promise<void>} */
+    /** @type {(req: MexpressRequest, res: MexpressResponse, next: () => void, extra: string) => Promise<void>} */
     const f = async function(req, res, next, extra) {
         if (typeof extra !== 'string') {
-            throw new Error('The extra parameter is missing for static handler');
+            throw new Error('The extra parameter is missing for the static handler');
         }
-        let url = decodeURIComponent(req.url.pathname.substring(extra.length)).substring(1);
-
-        // Do not handle dot files on the static server due to security implications
-        let dotFileIndex = url.indexOf('/.');
-        if (dotFileIndex === -1) {
-            dotFileIndex = url.indexOf('\\.');
-        }
-        if (dotFileIndex !== -1) {
-            const hashIndex = url.indexOf('#');
-            const questionIndex = url.indexOf('?');
-            if (
-                (hashIndex === -1 && questionIndex === -1) ||
-                (hashIndex === -1 && questionIndex !== -1 && dotFileIndex < questionIndex) ||
-                (hashIndex !== -1 && dotFileIndex < hashIndex)
-            ) {
-                return next();
-            }
-        }
+        let url = decodeURIComponent(extractPathnameFromRawUrl(req.url).substring(extra.length)).substring(1);
 
         let fullPath = path.resolve(staticFolderPath, url);
         let isDirectory;
@@ -912,7 +949,9 @@ mexpress.static = function(staticFolderPath, options = {}) {
             lastModifiedHeader: options.lastModifiedFeature,
         });
     };
+    // @ts-ignore
     f.isStatic = true;
+    // @ts-ignore
     return f;
 }
 
